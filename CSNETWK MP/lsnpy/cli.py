@@ -128,10 +128,9 @@ class LsnpCli:
             'TYPE': 'POST',
             'USER_ID': self.peer.user_id,
             'CONTENT': args,
-            'MESSAGE_ID': uuid.uuid4().hex[:8],
-            'TIMESTAMP': ts,
             'TTL': 3600,
-            'TOKEN': f"{self.peer.user_id} {ts+3600}|broadcast"
+            'MESSAGE_ID': uuid.uuid4().hex[:8],
+            'TOKEN': f"{self.peer.user_id}|{ts+3600}|broadcast"
         }
         self.peer._send_message(payload, BROADCAST_ADDR)
         print(f"Post broadcasted to followers with timestamp {ts}.")
@@ -154,9 +153,9 @@ class LsnpCli:
             'FROM': self.peer.user_id,
             'TO': recipient_id,
             'CONTENT': message,
-            'MESSAGE_ID': uuid.uuid4().hex[:8],
             'TIMESTAMP': ts,
-            'TOKEN': f"{self.peer.user_id} {ts+3600}|chat"
+            'MESSAGE_ID': uuid.uuid4().hex[:8],
+            'TOKEN': f"{self.peer.user_id}|{ts+3600}|chat"
         }
         self.peer._send_message(payload, (recipient_ip, PORT))
         print(f"DM sent to {recipient_id}.")
@@ -183,7 +182,7 @@ class LsnpCli:
             'FROM': self.peer.user_id,
             'TO': recipient_id,
             'TIMESTAMP': ts,
-            'TOKEN': f"{self.peer.user_id} {ts+3600}|follow"
+            'TOKEN': f"{self.peer.user_id}|{ts+3600}|follow"
         }
         self.peer._send_message(payload, (recipient_ip, PORT))
         if action_type == 'FOLLOW':
@@ -238,7 +237,7 @@ class LsnpCli:
                 'GROUP_NAME': group_name,
                 'MEMBERS': self.peer.user_id,
                 'TIMESTAMP': ts,
-                'TOKEN': f"{self.peer.user_id} {ts+3600}|group"
+                'TOKEN': f"{self.peer.user_id}|{ts+3600}|group"
             }
             self.peer.groups[group_id] = payload
             self.peer._send_message(payload, BROADCAST_ADDR)

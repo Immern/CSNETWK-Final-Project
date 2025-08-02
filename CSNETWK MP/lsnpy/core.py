@@ -83,18 +83,22 @@ class LsnpPeer:
 
     def _listen(self):
         """Continuously listens for incoming UDP messages."""
+        print(f"[{self.username}] Listener thread started. Waiting for messages...")
         while self.running:
             try:
                 data, addr = self.socket.recvfrom(8192)
                 if data:
+                    print(f"[{self.username}] Data received from {addr}!")
+                    print(f"[{self.username}] Raw data: {data.decode('utf-8')}") # <-- Add this line
                     # Delegate message handling to the message_handler object
                     self.message_handler.handle(self, data, addr)
             except socket.timeout:
                 continue
             except Exception as e:
                 if self.running:
-                    print(f"[ERROR] An error occurred in the listener: {e}")
+                    print(f"[{self.username}] An error occurred in the listener: {e}")
                 break
+        print(f"[{self.username}] Listener thread stopped.")
 
     def _periodic_presence(self):
         """Periodically broadcasts a PROFILE message to the network."""
