@@ -6,9 +6,8 @@ import uuid
 
 # LSNP Constants
 PORT = 50999
-# Use '<broadcast>' for the broadcast address, which is a platform-independent
-# way to send to the broadcast address.
 BROADCAST_ADDR = '<broadcast>'
+PRESENCE_INTERVAL = 300 # 300 seconds = 5 minutes
 
 class LsnpPeer:
     """
@@ -30,20 +29,18 @@ class LsnpPeer:
         self.verbose = False
         self.running = True
 
-        # Data stores for received messages
+        # Data stores
         self.known_peers = {} # Maps user_id to peer data
         self.posts = []
         self.dms = []
+        self.followers = set() # Users who follow this peer
+        self.following = set() # Users this peer follows
 
         # Set up the UDP socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # Allow reusing the address, helpful for quick restarts
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        # Enable broadcasting
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        # Bind to the LSNP port on all available interfaces
         self.socket.bind(('', PORT))
-        # Set a timeout so the listening loop doesn't block forever
         self.socket.settimeout(1.0)
 
         # Determine the user's local IP to create the USER_ID
@@ -54,15 +51,12 @@ class LsnpPeer:
         print(f"Your USER_ID is: {self.user_id}")
         print(f"Listening on port {PORT}...")
 
-
     def _get_local_ip(self):
         """
         Finds the local IP address of the machine.
-        This is a helper function to construct the USER_ID.
         """
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            # Doesn't have to be reachable
             s.connect(('10.255.255.255', 1))
             ip = s.getsockname()[0]
         except Exception:
@@ -73,12 +67,20 @@ class LsnpPeer:
 
     def start(self):
         """
-        Starts the peer's operation by launching listener and command threads.
+        Starts the peer's operation by launching listener, presence, and command threads.
         """
         print("\nStarting LSNP Peer... Type 'help' for a list of commands.")
+        
         # Thread for listening to incoming messages
         listener_thread = threading.Thread(target=self._listen, daemon=True)
         listener_thread.start()
+
+        # Thread for broadcasting presence periodically
+        presence_thread = threading.Thread(target=self._periodic_presence_broadcast, daemon=True)
+        presence_thread.start()
+        
+        # Send an initial profile message to be discovered immediately
+        self._send_profile_command(f"Hello! I'm {self.username}.")
 
         # The main thread will handle the command loop
         self._command_loop()
@@ -95,29 +97,39 @@ class LsnpPeer:
     def _listen(self):
         """
         Continuously listens for incoming UDP messages.
-        This method is intended to be run in a separate thread.
         """
         while self.running:
             try:
-                # Wait for a message
-                data, addr = self.socket.recvfrom(4096) # 4KB buffer size
+                data, addr = self.socket.recvfrom(4096)
                 if data:
                     self._handle_message(data, addr)
             except socket.timeout:
-                # No data received, just continue the loop
                 continue
             except Exception as e:
                 if self.running:
                     print(f"[ERROR] An error occurred in the listener: {e}")
                 break
+    
+    def _periodic_presence_broadcast(self):
+        """
+        Periodically broadcasts a PING message to signal presence.
+        This method is intended to be run in a separate thread.
+        """
+        while self.running:
+            time.sleep(PRESENCE_INTERVAL)
+            if self.running:
+                payload = {
+                    'TYPE': 'PING',
+                    'USER_ID': self.user_id
+                }
+                self._send_message(payload, BROADCAST_ADDR)
+                if self.verbose:
+                    print("\n[INFO] Sent periodic PING broadcast.")
+
 
     def _handle_message(self, data, addr):
         """
-        Processes a received message after it's been received by the listener.
-
-        Args:
-            data (bytes): The raw message data.
-            addr (tuple): The address (ip, port) of the sender.
+        Processes a received message.
         """
         try:
             message_str = data.decode('utf-8')
@@ -130,20 +142,43 @@ class LsnpPeer:
                 print(f"Parsed: {parsed_message}")
                 print("------------")
 
-            # Basic routing based on message type
             msg_type = parsed_message.get('TYPE')
+            sender_id = parsed_message.get('USER_ID') or parsed_message.get('FROM')
+
+            if not sender_id:
+                return # Ignore messages without a sender identifier
+
+            # Route message based on type
             if msg_type == 'PROFILE':
-                user_id = parsed_message.get('USER_ID')
-                if user_id:
-                    self.known_peers[user_id] = parsed_message
+                self.known_peers[sender_id] = parsed_message
+            
+            elif msg_type == 'PING':
+                 # A peer has announced their presence. We can respond with our profile.
+                if sender_id != self.user_id:
+                    self._send_profile_command(f"Replying to PING from {sender_id}", destination_addr=addr)
+
             elif msg_type == 'POST':
-                self.posts.append(parsed_message)
+                # Per RFC, only accept posts from users we follow.
+                if sender_id in self.following or sender_id == self.user_id:
+                    self.posts.append(parsed_message)
+                    if self.verbose:
+                        print(f"[INFO] Post from {sender_id} accepted (user is followed).")
+                elif self.verbose:
+                    print(f"[INFO] Post from {sender_id} ignored (user is not followed).")
+
             elif msg_type == 'DM':
-                # Only store DMs addressed to this user
                 if parsed_message.get('TO') == self.user_id:
                     self.dms.append(parsed_message)
-            # Other message types will be handled in later milestones
-            # but are parsed correctly here.
+            
+            elif msg_type == 'FOLLOW':
+                if parsed_message.get('TO') == self.user_id:
+                    self.followers.add(sender_id)
+                    print(f"\n[Notification] {sender_id} is now following you.")
+            
+            elif msg_type == 'UNFOLLOW':
+                if parsed_message.get('TO') == self.user_id:
+                    self.followers.discard(sender_id)
+                    print(f"\n[Notification] {sender_id} has unfollowed you.")
 
         except (UnicodeDecodeError, ValueError) as e:
             print(f"\n[ERROR] Could not process message from {addr}: {e}")
@@ -151,15 +186,11 @@ class LsnpPeer:
     def _parse_message(self, message_str):
         """
         Parses a raw LSNP message string into a dictionary.
-
-        Args:
-            message_str (str): The complete message string.
-
-        Returns:
-            dict: A dictionary representing the key-value pairs of the message.
         """
-        if not message_str.endswith('\n\n'):
-            raise ValueError("Message format invalid: does not end with a blank line.")
+        if not message_str.strip().endswith('\n'):
+            # A more robust check for the double newline
+            if '\n\n' not in message_str:
+                 raise ValueError("Message format invalid: does not end with a blank line.")
 
         message_dict = {}
         lines = message_str.strip().split('\n')
@@ -170,16 +201,15 @@ class LsnpPeer:
                 key, value = line.split(':', 1)
                 key = key.strip()
                 value = value.strip()
-
-                # Handle multi-line data for fields like AVATAR_DATA
+                
                 if key == 'AVATAR_DATA':
                     data_lines = [value]
                     i += 1
-                    while i < len(lines) and ':' not in lines[i]:
+                    while i < len(lines) and ':' not in lines[i] and lines[i] != '':
                         data_lines.append(lines[i])
                         i += 1
                     message_dict[key] = '\n'.join(data_lines)
-                    continue # Continue to the next key-value pair
+                    continue
                 else:
                     message_dict[key] = value
             i += 1
@@ -188,27 +218,15 @@ class LsnpPeer:
     def _format_message(self, payload):
         """
         Formats a dictionary payload into a valid LSNP message string.
-
-        Args:
-            payload (dict): The dictionary of key-value pairs to format.
-
-        Returns:
-            str: A formatted LSNP message string.
         """
         message_parts = []
         for key, value in payload.items():
             message_parts.append(f"{key}: {value}")
-        # Join with newlines and add the required trailing blank line
         return '\n'.join(message_parts) + '\n\n'
 
     def _send_message(self, payload, destination_addr):
         """
         Formats and sends a message to a given destination.
-
-        Args:
-            payload (dict): The message payload.
-            destination_addr (tuple or str): The destination address.
-                                             Can be ('ip', port) or '<broadcast>'.
         """
         try:
             message_str = self._format_message(payload)
@@ -232,11 +250,10 @@ class LsnpPeer:
 
     def _command_loop(self):
         """
-        Handles user input from the command line to drive the peer's actions.
+        Handles user input from the command line.
         """
         while self.running:
             try:
-                # Prompt user for input
                 cmd_input = input(f"\n({self.username}) > ").strip()
                 if not cmd_input:
                     continue
@@ -245,7 +262,6 @@ class LsnpPeer:
                 command = parts[0].lower()
                 args = parts[1] if len(parts) > 1 else ""
 
-                # --- Command Handling ---
                 if command == 'quit':
                     self.running = False
                 elif command == 'help':
@@ -254,17 +270,23 @@ class LsnpPeer:
                     self.verbose = not self.verbose
                     print(f"Verbose mode is now {'ON' if self.verbose else 'OFF'}.")
                 elif command == 'profile':
-                    self._send_profile_command(args)
+                    self._send_profile_command(args, BROADCAST_ADDR)
                 elif command == 'post':
                     self._send_post_command(args)
                 elif command == 'dm':
                     self._send_dm_command(args)
+                elif command == 'follow':
+                    self._send_follow_command(args)
+                elif command == 'unfollow':
+                    self._send_unfollow_command(args)
                 elif command == 'peers':
                     self._print_peers()
                 elif command == 'posts':
                     self._print_posts()
                 elif command == 'dms':
                     self._print_dms()
+                elif command == 'connections':
+                    self._print_connections()
                 else:
                     print(f"Unknown command: '{command}'. Type 'help' for a list of commands.")
 
@@ -278,17 +300,20 @@ class LsnpPeer:
     def _print_help(self):
         print("\n--- LSNP Client Commands ---")
         print("profile <status>             - Broadcast your profile with a new status.")
-        print("post <content>               - Broadcast a public post.")
+        print("post <content>               - Broadcast a public post to your followers.")
         print("dm <user_id> <message>       - Send a direct message to a user.")
+        print("follow <user_id>             - Follow a user to receive their posts.")
+        print("unfollow <user_id>           - Unfollow a user.")
         print("peers                        - List all known peers on the network.")
-        print("posts                        - Show all received public posts.")
+        print("posts                        - Show posts from users you follow.")
         print("dms                          - Show all received direct messages for you.")
+        print("connections                  - Show your followers and who you are following.")
         print("verbose                      - Toggle detailed message logging ON/OFF.")
         print("help                         - Show this help message.")
         print("quit                         - Shut down the client.")
         print("--------------------------")
 
-    def _send_profile_command(self, args):
+    def _send_profile_command(self, args, destination_addr=BROADCAST_ADDR):
         if not args:
             print("Usage: profile <status>")
             return
@@ -298,20 +323,24 @@ class LsnpPeer:
             'DISPLAY_NAME': self.username,
             'STATUS': args
         }
-        self._send_message(payload, BROADCAST_ADDR)
-        print("Profile broadcasted.")
+        self._send_message(payload, destination_addr)
+        if destination_addr == BROADCAST_ADDR:
+            print("Profile broadcasted.")
 
     def _send_post_command(self, args):
         if not args:
             print("Usage: post <content>")
             return
+        # This is broadcast, but only followers should accept it.
         payload = {
             'TYPE': 'POST',
             'USER_ID': self.user_id,
             'CONTENT': args,
-            'MESSAGE_ID': uuid.uuid4().hex[:16], # Example message ID
+            'MESSAGE_ID': uuid.uuid4().hex[:16],
             'TIMESTAMP': int(time.time()),
-            'TTL': 3600
+            'TTL': 3600,
+            # Placeholder token for now
+            'TOKEN': f"{self.user_id}|{int(time.time()) + 3600}|broadcast"
         }
         self._send_message(payload, BROADCAST_ADDR)
         print("Post broadcasted.")
@@ -323,13 +352,9 @@ class LsnpPeer:
             return
         recipient_id, message = parts
         
-        # Find recipient IP from known peers
-        recipient_ip = None
-        if '@' in recipient_id:
-             recipient_ip = recipient_id.split('@')[1]
-        
+        recipient_ip = self._get_ip_for_user(recipient_id)
         if not recipient_ip:
-            print(f"Error: Could not determine IP for '{recipient_id}'. Make sure they have sent a profile message.")
+            print(f"Error: Could not determine IP for '{recipient_id}'. Make sure they are a known peer.")
             return
 
         payload = {
@@ -338,15 +363,80 @@ class LsnpPeer:
             'TO': recipient_id,
             'CONTENT': message,
             'MESSAGE_ID': uuid.uuid4().hex[:16],
-            'TIMESTAMP': int(time.time())
+            'TIMESTAMP': int(time.time()),
+            # Placeholder token for now
+            'TOKEN': f"{self.user_id}|{int(time.time()) + 3600}|chat"
         }
         self._send_message(payload, (recipient_ip, PORT))
         print(f"DM sent to {recipient_id}.")
+        
+    def _send_follow_command(self, args):
+        recipient_id = args.strip()
+        if not recipient_id:
+            print("Usage: follow <user_id>")
+            return
+            
+        if recipient_id == self.user_id:
+            print("You cannot follow yourself.")
+            return
+
+        recipient_ip = self._get_ip_for_user(recipient_id)
+        if not recipient_ip:
+            print(f"Error: Could not determine IP for '{recipient_id}'. Make sure they are a known peer.")
+            return
+            
+        payload = {
+            'TYPE': 'FOLLOW',
+            'FROM': self.user_id,
+            'TO': recipient_id,
+            'MESSAGE_ID': uuid.uuid4().hex[:16],
+            'TIMESTAMP': int(time.time()),
+            # Placeholder token for now
+            'TOKEN': f"{self.user_id}|{int(time.time()) + 3600}|follow"
+        }
+        self._send_message(payload, (recipient_ip, PORT))
+        self.following.add(recipient_id)
+        print(f"You are now following {recipient_id}.")
+
+    def _send_unfollow_command(self, args):
+        recipient_id = args.strip()
+        if not recipient_id:
+            print("Usage: unfollow <user_id>")
+            return
+
+        recipient_ip = self._get_ip_for_user(recipient_id)
+        if not recipient_ip:
+            print(f"Error: Could not determine IP for '{recipient_id}'. Make sure they are a known peer.")
+            return
+            
+        payload = {
+            'TYPE': 'UNFOLLOW',
+            'FROM': self.user_id,
+            'TO': recipient_id,
+            'MESSAGE_ID': uuid.uuid4().hex[:16],
+            'TIMESTAMP': int(time.time()),
+            # Placeholder token for now
+            'TOKEN': f"{self.user_id}|{int(time.time()) + 3600}|follow"
+        }
+        self._send_message(payload, (recipient_ip, PORT))
+        self.following.discard(recipient_id)
+        print(f"You have unfollowed {recipient_id}.")
+
+    def _get_ip_for_user(self, user_id):
+        """Helper to find an IP for a given user_id from known peers or the ID itself."""
+        if '@' in user_id:
+            return user_id.split('@')[1]
+        # Fallback to check known_peers if a plain username is given
+        for peer_id, data in self.known_peers.items():
+            if data.get('DISPLAY_NAME') == user_id:
+                if '@' in peer_id:
+                    return peer_id.split('@')[1]
+        return None
 
     def _print_peers(self):
         print("\n--- Known Peers ---")
         if not self.known_peers:
-            print("No peers discovered yet. Wait for a PROFILE message.")
+            print("No peers discovered yet. Wait for a PROFILE or PING message.")
         else:
             for user_id, data in self.known_peers.items():
                 name = data.get('DISPLAY_NAME', 'N/A')
@@ -355,7 +445,7 @@ class LsnpPeer:
         print("-------------------")
 
     def _print_posts(self):
-        print("\n--- Public Posts ---")
+        print("\n--- Public Posts (from users you follow) ---")
         if not self.posts:
             print("No posts received yet.")
         else:
@@ -363,7 +453,7 @@ class LsnpPeer:
                 sender = post.get('USER_ID', 'Unknown')
                 content = post.get('CONTENT', '')
                 print(f"{i+1}. From {sender}: {content}")
-        print("--------------------")
+        print("--------------------------------------------")
 
     def _print_dms(self):
         print("\n--- Direct Messages for You ---")
@@ -376,23 +466,37 @@ class LsnpPeer:
                 print(f"{i+1}. From {sender}: {content}")
         print("-------------------------------")
 
+    def _print_connections(self):
+        print("\n--- Your Connections ---")
+        print("Following:")
+        if not self.following:
+            print("  (You are not following anyone)")
+        else:
+            for user in self.following:
+                print(f"  - {user}")
+        
+        print("\nFollowers:")
+        if not self.followers:
+            print("  (You have no followers)")
+        else:
+            for user in self.followers:
+                print(f"  - {user}")
+        print("------------------------")
+
 
 if __name__ == "__main__":
-    # Entry point of the script
     try:
-        # Get username from command line argument or prompt the user
         if len(sys.argv) > 1:
             peer_username = sys.argv[1]
         else:
             peer_username = input("Enter your username: ").strip()
 
         peer = LsnpPeer(username=peer_username)
-        peer.start() # This will block until the user quits
+        peer.start()
 
     except ValueError as e:
         print(f"[FATAL] {e}")
     except KeyboardInterrupt:
         print("\nUser interrupted. Shutting down.")
     finally:
-        # The stop method is called within the command loop on 'quit' or Ctrl+C
         print("\nApplication has been terminated.")
