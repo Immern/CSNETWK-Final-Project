@@ -137,6 +137,7 @@ class LsnpCli:
 
     def _send_dm_command(self, args):
         parts = args.split(maxsplit=1)
+        # Checks if the user provided both recipient ID and message
         if len(parts) < 2:
             print("Usage: dm <user_id> <message>")
             return
@@ -215,11 +216,12 @@ class LsnpCli:
             'POST_TIMESTAMP': post_ts,
             'ACTION': 'LIKE',
             'TIMESTAMP': ts,
-            'TOKEN': f"{self.peer.user_id} {ts+3600}|broadcast"
+            'TOKEN': f"{self.peer.user_id}|{ts+3600}|broadcast"
         }
         self.peer._send_message(payload, (recipient_ip, PORT))
         print(f"Like sent for post {post_ts} to {recipient_id}.")
     
+    # Should be modified to be split into GROUP_CREATE, GROUP_MESSAGE, GROUP_UPDATE
     def _handle_group_command(self, args):
         parts = args.split(maxsplit=2)
         sub_command = parts[0].lower() if parts else ""
@@ -265,6 +267,7 @@ class LsnpCli:
         else:
             print("Unknown group command. Use 'group create' or 'group msg'.")
 
+    # Should be modified to be split into TICTACTOE_INVITE, TICTACTOE_MOVE
     def _handle_game_command(self, args):
         parts = args.split(maxsplit=1)
         sub_command = parts[0].lower() if parts else ""
