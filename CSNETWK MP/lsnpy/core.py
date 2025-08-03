@@ -14,12 +14,13 @@ class LsnpPeer:
     This class handles network communication and maintains the peer's state.
     """
 
-    def __init__(self, username, message_handler):
+    def __init__(self, username, message_handler, bind_ip=''): # Corrected: Added 'bind_ip' parameter
         """
         Initializes the LSNP peer.
         Args:
             username (str): The display name for this user.
             message_handler (LsnpMessageHandler): An object to handle incoming messages.
+            bind_ip (str): The IP address to bind the socket to.
         """
         if not username:
             raise ValueError("Username cannot be empty.")
@@ -42,12 +43,25 @@ class LsnpPeer:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        self.socket.bind(('', PORT))
+        try:
+            self.socket.bind((bind_ip, PORT)) # Use the bind_ip here
+        except Exception as e:
+            raise OSError(f"Could not bind to port {PORT}. Is another instance already running? Error: {e}")
         self.socket.settimeout(1.0)
 
-        # Determine the user's local IP to create the USER_ID
-        self.ip_address = self._get_local_ip()
-        self.user_id = f"{self.username}@{self.ip_address}"
+        # Get the IP address used for this peer
+        self.ip = self.socket.getsockname()[0]
+        if self.ip == '0.0.0.0' or self.ip == '':
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect(("8.8.8.8", 80))
+                self.ip = s.getsockname()[0]
+            except Exception:
+                self.ip = '127.0.0.1' # Fallback to loopback
+            finally:
+                s.close()
+            
+        self.user_id = f"{self.username}@{self.ip}"
 
         print(f"LSNP Peer '{self.username}' initialized.")
         print(f"Your USER_ID is: {self.user_id}")
@@ -89,7 +103,7 @@ class LsnpPeer:
                 data, addr = self.socket.recvfrom(8192)
                 if data:
                     print(f"[{self.username}] Data received from {addr}!")
-                    print(f"[{self.username}] Raw data: {data.decode('utf-8')}") # <-- Add this line
+                    print(f"[{self.username}] Raw data: {data.decode('utf-8')}")
                     # Delegate message handling to the message_handler object
                     self.message_handler.handle(self, data, addr)
             except socket.timeout:
