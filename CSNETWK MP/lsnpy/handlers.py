@@ -17,6 +17,20 @@ class LsnpMessageHandler:
             'GROUP_CREATE': self._handle_group_create,
             'GROUP_MESSAGE': self._handle_group_message,
             'TICTACTOE_INVITE': self._handle_tictactoe_invite,
+            'TICTACTOE_MOVE': self._handle_tictactoe_move,     
+        }
+        # dictionary mapping scope types to message handlers to be used for validation
+        self.message_scopes = {
+            'PROFILE': 'broadcast',
+            'POST': 'broadcast',
+            'LIKE': 'broadcast',
+            'DM': 'chat',
+            'FOLLOW': 'follow',
+            'UNFOLLOW': 'follow',
+            'GROUP_CREATE': 'group',
+            'GROUP_MESSAGE': 'group',
+            'TICTACTOE_INVITE': 'game',
+            'TICTACTOE_MOVE': 'game',
         }
 
     def handle(self, peer, data, addr):
@@ -106,6 +120,28 @@ class LsnpMessageHandler:
 
     def _handle_tictactoe_invite(self, peer, message, addr):
         if message.get('TO') == peer.user_id:
+            game_id = message.get('GAMEID')
             sender_id = message.get('FROM')
-            print(f"\n[Game] {sender_id} is inviting you to play Tic Tac Toe.")
+            peer.pending_game_invites[game_id] = message
+            print(f"\n[New Game] {sender_id} is inviting you to play Tic Tac Toe on Game ID {game_id}.")
+            print(peer.pending_game_invites)
             print(f"({peer.username}) > ", end='', flush=True)
+            
+    def _handle_tictactoe_move(self, peer, message, addr):
+        game_id = message.get('GAMEID')
+        mover_id = message.get('FROM')
+        position = int(message.get('POSITION'))
+        
+        # Check if this is the first move (the one that accepts the game)
+        game = peer.active_games.get(game_id)
+        if not game:
+            invite_message = peer.pending_game_invites.get(game_id)
+            if invite_message and mover_id != peer.user_id:
+                inviter_id = invite_message['FROM']
+                peer.active_games[game_id] = 'new game'  # Placeholder for game state
+                game = peer.active_games[game_id]
+                # Remove the invite since the game is now active
+                del peer.pending_game_invites[game_id]
+                print(f"\n[GAME START] Game {game_id} accepted and started by {mover_id}!")
+
+        # [INSERT GAME LOGIC HERE]

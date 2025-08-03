@@ -50,7 +50,8 @@ class LsnpCli:
                     'following': self._print_following,
                     'like': self._send_like_command,
                     'group': self._handle_group_command,
-                    'game': self._handle_game_command,
+                    'tictactoe_invite': self._handle_tictactoe_invite_command,
+                    'tictactoe_move': self._handle_tictactoe_move_command,
                 }
                 
                 method = command_methods.get(command)
@@ -268,37 +269,87 @@ class LsnpCli:
             print("Unknown group command. Use 'group create' or 'group msg'.")
 
     # Should be modified to be split into TICTACTOE_INVITE, TICTACTOE_MOVE
-    def _handle_game_command(self, args):
+    def _handle_tictactoe_invite_command(self, args):
         parts = args.split(maxsplit=1)
-        sub_command = parts[0].lower() if parts else ""
+        print(parts)
+        # Validate
+        if len(parts) < 1:
+            print("Usage: tictactoe_invite <user_id>")
+            return
+        recipient_id = parts[0]
+        recipient_ip = self.peer.get_recipient_ip(recipient_id)
+        if not recipient_ip:
+            print(f"Error: Could not determine IP for '{recipient_id}'.")
+            return
+        ts = int(time.time())
+        game_id = f"g{uuid.uuid4().int & (1<<8)-1}"
+        payload = {
+            'TYPE': 'TICTACTOE_INVITE',
+            'FROM': self.peer.user_id,
+            'TO': recipient_id,
+            'GAMEID': game_id,
+            'MESSAGE_ID': uuid.uuid4().hex[:8],
+            'SYMBOL': 'X',
+            'TIMESTAMP': ts,
+            'TOKEN': f"{self.peer.user_id}|{ts+3600}|game"
+        }
+        self.peer._send_message(payload, (recipient_ip, PORT))
+        self.peer.pending_game_invites[game_id] = payload
+        print(f"Tic Tac Toe invitation sent to {recipient_id} for game {game_id}.")
+        print(self.peer.pending_game_invites)
+    
+    def _handle_tictactoe_move_command(self, args):
+        """
+        Sends a game move. This command also implicitly accepts an invite if one is pending.
+        """
+        
+        parts = args.split()
+        if len(parts) != 2:
+            print("Usage: tictactoe_move <game_id> <position>")
+            return
 
-        if sub_command == "invite":
-            if len(parts) < 2:
-                print("Usage: game invite <user_id>")
-                return
-            recipient_id = parts[1]
-            recipient_ip = self.peer.get_recipient_ip(recipient_id)
-            if not recipient_ip:
-                print(f"Error: Could not determine IP for '{recipient_id}'.")
-                return
-            
-            ts = int(time.time())
-            game_id = f"g{uuid.uuid4().int & (1<<8)-1}"
-            payload = {
-                'TYPE': 'TICTACTOE_INVITE',
-                'FROM': self.peer.user_id,
-                'TO': recipient_id,
-                'GAMEID': game_id,
-                'MESSAGE_ID': uuid.uuid4().hex[:8],
-                'SYMBOL': 'X',
-                'TIMESTAMP': ts,
-                'TOKEN': f"{self.peer.user_id} {ts+3600}|game"
-            }
-            self.peer._send_message(payload, (recipient_ip, PORT))
-            print(f"Tic Tac Toe invitation sent to {recipient_id}.")
-        else:
-            print("Unknown game command. Use 'game invite'.")
+        game_id, position_str = parts
+        try:
+            position = int(position_str)
+            if not 0 <= position <= 8:
+                raise ValueError
+        except ValueError:
+            print(f"Invalid position: {position_str}. Use a number between 0 and 8.")
+            return
 
+        # Check for an active game
+        game = self.peer.active_games.get(game_id)
+        print(f"Pending test: {self.peer.pending_game_invites}")
+        # If no active game, check for a pending invite and handle the first move
+        if not game:
+            invite_message = self.peer.pending_game_invites.get(game_id)
+            if not invite_message:
+                print(f"Error: No active game or pending invite for game ID {game_id}.")
+                return
+
+            opponent_id = invite_message['TO']
+            opponent_ip = self.peer.get_recipient_ip(opponent_id)
+
+            # Create the game on our side (the inviter)
+            self.peer.active_games[game_id] = 'test game'  # Placeholder for game state
+            game = self.peer.active_games[game_id]
+            # Remove the invite now that the game is active
+            del self.peer.pending_game_invites[game_id]
+            print(f"Game {game_id} started with {opponent_id}.")
+        
+        # [INSERT GAME LOGIC HERE]
+        payload = {
+            'TYPE': 'TICTACTOE_MOVE',
+            'FROM': self.peer.user_id,
+            'TO': opponent_id,
+            'GAMEID': game_id,
+            'POSITION': position,
+            'TIMESTAMP': int(time.time()),
+            'MESSAGE_ID': uuid.uuid4().hex[:8],
+            'TOKEN': f"{self.peer.user_id}|{int(time.time())+3600}|game"
+        }
+        self.peer._send_message(payload, (opponent_ip, PORT))
+    
     def _print_posts(self, args):
         print("\n--- Public Posts (from users you follow) ---")
         if not self.peer.posts:

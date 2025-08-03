@@ -37,8 +37,9 @@ class LsnpPeer:
         self.followers = set()
         self.following = set()
         self.groups = {} # Maps group_id to group data
-        self.games = {} # Maps game_id to game state
-
+        self.pending_game_invites = {}
+        self.active_games = {}
+        
         # Set up the UDP socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
