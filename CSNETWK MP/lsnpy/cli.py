@@ -3,7 +3,7 @@ import time
 import uuid
 import threading
 from lsnpy.core import LsnpPeer, BROADCAST_ADDR, PORT
-
+from lsnpy.handlers import TicTacToe
 class LsnpCli:
     """
     Manages the command-line interface and user input for the LSNP peer.
@@ -294,7 +294,6 @@ class LsnpCli:
             'TOKEN': f"{self.peer.user_id}|{ts+3600}|game"
         }
         self.peer._send_message(payload, (recipient_ip, PORT))
-        self.peer.pending_game_invites[game_id] = payload
         print(f"Tic Tac Toe invitation sent to {recipient_id} for game {game_id}.")
         print(self.peer.pending_game_invites)
     
@@ -319,7 +318,7 @@ class LsnpCli:
 
         # Check for an active game
         game = self.peer.active_games.get(game_id)
-        print(f"Pending test: {self.peer.pending_game_invites}")
+        print(f"Active test: {self.peer.active_games}")
         # If no active game, check for a pending invite and handle the first move
         if not game:
             invite_message = self.peer.pending_game_invites.get(game_id)
@@ -327,17 +326,37 @@ class LsnpCli:
                 print(f"Error: No active game or pending invite for game ID {game_id}.")
                 return
 
-            opponent_id = invite_message['TO']
+            opponent_id = invite_message['FROM']
             opponent_ip = self.peer.get_recipient_ip(opponent_id)
 
             # Create the game on our side (the inviter)
-            self.peer.active_games[game_id] = 'test game'  # Placeholder for game state
+            self.peer.active_games[game_id] = TicTacToe(self.peer.user_id, opponent_id)
             game = self.peer.active_games[game_id]
             # Remove the invite now that the game is active
             del self.peer.pending_game_invites[game_id]
             print(f"Game {game_id} started with {opponent_id}.")
+
+        # Determine opponent and their IP
+        print(f"Current game state: {game.players}")
+        opponent_id = game.players['O' if game.players['X'] == self.peer.user_id else 'X']
+        opponent_ip = self.peer.get_recipient_ip(opponent_id)
+
+        # Check if it's the current player's turn
+        if game.players[game.current_player_symbol] != self.peer.user_id:
+            print(f"Error: It's not your turn.")
+            return
+            
+        row, col = position // 3, position % 3
+        success, message = game.make_move(self.peer.user_id, row, col)
+        if not success:
+            print(f"Error: {message}")
+            return
+            
+        if not opponent_ip:
+            print(f"Error: Could not determine IP for opponent '{opponent_id}'.")
+            return
         
-        # [INSERT GAME LOGIC HERE]
+        # Send the move message
         payload = {
             'TYPE': 'TICTACTOE_MOVE',
             'FROM': self.peer.user_id,
@@ -349,6 +368,20 @@ class LsnpCli:
             'TOKEN': f"{self.peer.user_id}|{int(time.time())+3600}|game"
         }
         self.peer._send_message(payload, (opponent_ip, PORT))
+
+        # Update local CLI state
+        print(f"Your move: {position}")
+        game.display_board()
+        win_message = game.check_win()
+        if win_message:
+            print(f"[GAME OVER] {win_message}")
+            del self.peer.active_games[game_id]
+        elif game.check_draw():
+            print(f"[GAME OVER] It's a draw!")
+            del self.peer.active_games[game_id]
+        else:
+            print(f"It's now {opponent_id}'s turn.")
+            
     
     def _print_posts(self, args):
         print("\n--- Public Posts (from users you follow) ---")

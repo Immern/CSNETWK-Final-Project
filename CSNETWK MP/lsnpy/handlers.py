@@ -1,5 +1,58 @@
 import socket
 
+class TicTacToe:
+    """
+    Handles the Tic Tac Toe game logic, including sending invites and processing moves.
+    """
+
+    def __init__(self, player1_id, player2_id):
+        self.players = {
+            'X' : player1_id, 
+            'O' : player2_id
+        }
+        self.board = [[' ' for _ in range(3)] for _ in range(3)]
+        self.current_player_symbol = 'X'
+        
+    def display_board(self):
+        for i in range(3):
+            for j in range(3):
+                print(f" {self.board[i][j]} ", end='')
+                if j < 2:
+                    print("|", end='')
+                else:
+                    print('\n')
+            if i < 2:
+                print("-----------")
+            
+    def make_move(self, player_id, row, col):
+        if(self.players[self.current_player_symbol] != player_id):
+            return False, (f"Error: It's not your turn, {player_id}.")
+        if not (0 <= row < 3 and 0 <= col < 3):
+            return False,"Error: Move out of bounds."
+        if self.board[row][col] != ' ':
+            return False, "Error: Cell already occupied."
+        self.board[row][col] = self.current_player_symbol
+        self.current_player_symbol = 'O' if self.current_player_symbol == 'X' else 'X'
+        return True, "Move Successful."
+        
+    def check_win(self):
+        for symbol in ['X', 'O']:
+            # Check rows
+            for row in self.board:
+                if all(cell == symbol for cell in row):
+                    return f"{symbol} wins!"
+            # Check columns
+            for col in range(3):
+                if all(self.board[row][col] == symbol for row in range(3)):
+                    return f"{symbol} wins!"
+            # Check diagonals
+            if all(self.board[i][i] == symbol for i in range(3)) or \
+               all(self.board[i][2 - i] == symbol for i in range(3)):
+                return f"{symbol} wins!"
+            
+    def check_draw(self):        
+       return not any(' ' in row for row in self.board)
+
 class LsnpMessageHandler:
     """
     Handles and processes incoming LSNP messages, updating the peer's state.
@@ -122,26 +175,56 @@ class LsnpMessageHandler:
         if message.get('TO') == peer.user_id:
             game_id = message.get('GAMEID')
             sender_id = message.get('FROM')
+            # Check to prevent a user from inviting themselves
+            if sender_id == peer.user_id:
+                print(f"\n[Game Error] You cannot invite yourself to a game.")
+                print(f"({peer.username}) > ", end='', flush=True)
+                return
             peer.pending_game_invites[game_id] = message
             print(f"\n[New Game] {sender_id} is inviting you to play Tic Tac Toe on Game ID {game_id}.")
-            print(peer.pending_game_invites)
             print(f"({peer.username}) > ", end='', flush=True)
             
     def _handle_tictactoe_move(self, peer, message, addr):
         game_id = message.get('GAMEID')
         mover_id = message.get('FROM')
         position = int(message.get('POSITION'))
+        row, col = position//3, position % 3
         
-        # Check if this is the first move (the one that accepts the game)
         game = peer.active_games.get(game_id)
+        # Game just started
         if not game:
             invite_message = peer.pending_game_invites.get(game_id)
-            if invite_message and mover_id != peer.user_id:
+            print(f'handlers {invite_message}')
+            if invite_message:
                 inviter_id = invite_message['FROM']
-                peer.active_games[game_id] = 'new game'  # Placeholder for game state
+                peer.active_games[game_id] = TicTacToe(inviter_id, mover_id)
                 game = peer.active_games[game_id]
                 # Remove the invite since the game is now active
-                del peer.pending_game_invites[game_id]
+                if game_id in peer.pending_game_invites:
+                    del peer.pending_game_invites[game_id]
                 print(f"\n[GAME START] Game {game_id} accepted and started by {mover_id}!")
+            else:
+                inviter_id = peer.user_id
+                peer.active_games[game_id] = TicTacToe(mover_id, inviter_id)
+                game = peer.active_games[game_id]
+                print(f"\n[GAME ACCEPTED] Game {game_id} accepted by {mover_id}.")
+        # Game is active
+        if game:
+            success, message = game.make_move(mover_id, row, col)
+            if success:
+                print(f"\n[Game Move] {mover_id} made a move at ({row}, {col}).")
+                game.display_board()
+                win_message = game.check_win()
+                if win_message:
+                    print(f"\n[Game Over] {win_message}")
+                    del peer.active_games[game_id]
+                elif game.check_draw():
+                    print("\n[Game Over] It's a draw!")
+                    del peer.active_games[game_id]
+            else:
+                print(f"\n[Game Error] {message} (from {mover_id})")
+        else:
+            if peer.verbose:
+                print(f"[{peer.username}] Received a game move for a non-existent game: {game_id}")
+        print(f"({peer.username}) > ", end='', flush=True)
 
-        # [INSERT GAME LOGIC HERE]
