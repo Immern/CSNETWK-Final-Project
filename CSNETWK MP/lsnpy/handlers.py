@@ -60,6 +60,7 @@ class LsnpMessageHandler:
 
     def __init__(self):
         self.handlers = {
+            'PING': self._handle_ping,
             'PROFILE': self._handle_profile,
             'POST': self._handle_post,
             'DM': self._handle_dm,
@@ -69,10 +70,11 @@ class LsnpMessageHandler:
             'GROUP_CREATE': self._handle_group_create,
             'GROUP_MESSAGE': self._handle_group_message,
             'TICTACTOE_INVITE': self._handle_tictactoe_invite,
-            'TICTACTOE_ACCEPT': self._handle_tictactoe_accept, # New handler
+            'TICTACTOE_ACCEPT': self._handle_tictactoe_accept,
             'TICTACTOE_MOVE': self._handle_tictactoe_move,     
         }
         self.message_scopes = {
+            'PING': 'broadcast',
             'PROFILE': 'broadcast',
             'POST': 'broadcast',
             'LIKE': 'broadcast',
@@ -82,7 +84,7 @@ class LsnpMessageHandler:
             'GROUP_CREATE': 'group',
             'GROUP_MESSAGE': 'group',
             'TICTACTOE_INVITE': 'game',
-            'TICTACTOE_ACCEPT': 'game', # New scope
+            'TICTACTOE_ACCEPT': 'game',
             'TICTACTOE_MOVE': 'game',
         }
 
@@ -112,11 +114,16 @@ class LsnpMessageHandler:
         except (UnicodeDecodeError, ValueError) as e:
             print(f"\n[ERROR] Could not process message from {addr}: {e}")
 
+    def _handle_ping(self, peer, message, addr):
+        user_id = message.get('USER_ID')
+        if peer.verbose:
+            print(f"\n[PING] Received from {user_id}")
+
     def _handle_profile(self, peer, message, addr):
         user_id = message.get('USER_ID')
         if user_id and user_id not in peer.known_peers:
             print(f"\n[Discovery] New peer discovered: {user_id}")
-            print(f"({peer.username}) > ", end='', flush=True)
+            print(f"\n({peer.username}) > ", end='', flush=True)
             peer.known_peers[user_id] = message
         elif user_id:
             peer.known_peers[user_id] = message
@@ -128,86 +135,82 @@ class LsnpMessageHandler:
             print(f"\n[New Post] From {sender_id}: {message.get('CONTENT')}")
             print(f"({peer.username}) > ", end='', flush=True)
         elif peer.verbose:
-            print(f"\n[Ignored Post] From non-followed user: {sender_id}")
+            print(f"\n[Ignored Post] User {peer.user_id} is not following {sender_id}")
 
     def _handle_dm(self, peer, message, addr):
         if message.get('TO') == peer.user_id:
             peer.dms.append(message)
             sender_id = message.get('FROM')
             print(f"\n[DM] From {sender_id}: {message.get('CONTENT')}")
-            print(f"({peer.username}) > ", end='', flush=True)
+            print(f"\n({peer.username}) > ", end='', flush=True)
 
     def _handle_follow(self, peer, message, addr):
         if message.get('TO') == peer.user_id:
             sender_id = message.get('FROM')
             peer.followers.add(sender_id)
             print(f"\n[Notification] User {sender_id} has followed you.")
-            print(f"({peer.username}) > ", end='', flush=True)
+            print(f"\n({peer.username}) > ", end='', flush=True)
     
     def _handle_unfollow(self, peer, message, addr):
         if message.get('TO') == peer.user_id:
             sender_id = message.get('FROM')
             peer.followers.discard(sender_id)
             print(f"\n[Notification] User {sender_id} has unfollowed you.")
-            print(f"({peer.username}) > ", end='', flush=True)
+            print(f"\n({peer.username}) > ", end='', flush=True)
 
     def _handle_like(self, peer, message, addr):
         if message.get('TO') == peer.user_id:
             sender_id = message.get('FROM')
             print(f"\n[Notification] {sender_id} liked your post.")
-            print(f"({peer.username}) > ", end='', flush=True)
+            print(f"\n({peer.username}) > ", end='', flush=True)
 
     def _handle_group_create(self, peer, message, addr):
         if peer.user_id in message.get('MEMBERS', ''):
             group_id = message.get('GROUP_ID')
             peer.groups[group_id] = message
             print(f"\n[Notification] You've been added to group: {message.get('GROUP_NAME')}")
-            print(f"({peer.username}) > ", end='', flush=True)
+            print(f"\n({peer.username}) > ", end='', flush=True)
 
     def _handle_group_message(self, peer, message, addr):
         group_id = message.get('GROUP_ID')
         if group_id in peer.groups:
             sender_id = message.get('FROM')
             print(f"\n[Group Message] {sender_id}: {message.get('CONTENT')}")
-            print(f"({peer.username}) > ", end='', flush=True)
+            print(f"\n({peer.username}) > ", end='', flush=True)
 
     def _handle_tictactoe_invite(self, peer, message, addr):
         if message.get('TO') == peer.user_id:
             game_id = message.get('GAMEID')
             sender_id = message.get('FROM')
             
-            # Prevent self-invites
             if sender_id == peer.user_id:
                 print(f"\n[Game Error] You cannot invite yourself to a game.")
-                print(f"({peer.username}) > ", end='', flush=True)
+                print(f"\n({peer.username}) > ", end='', flush=True)
                 return
 
             peer.pending_game_invites[game_id] = message
             print(f"\n[New Game] {sender_id} is inviting you to play Tic Tac Toe (Game ID: {game_id}).")
             print(f"Type 'tictactoe_accept {game_id}' to play.")
-            print(f"({peer.username}) > ", end='', flush=True)
+            print(f"\n({peer.username}) > ", end='', flush=True)
 
     def _handle_tictactoe_accept(self, peer, message, addr):
         """Handles the confirmation of a game invite."""
         game_id = message.get('GAMEID')
         acceptor_id = message.get('FROM')
 
-        # Check if this peer was the one who sent the invite
         invite = peer.pending_game_invites.get(game_id)
         if not invite or invite.get('FROM') != peer.user_id:
             return
 
-        # Create the game, with the inviter as 'X' and acceptor as 'O'
         peer.active_games[game_id] = TicTacToe(peer.user_id, acceptor_id)
         game = peer.active_games[game_id]
 
-        # Remove the pending invite
         del peer.pending_game_invites[game_id]
 
         print(f"\n[Game START] {acceptor_id} has accepted your game invite for {game_id}!")
         game.display_board()
         print("It's your turn. Use 'tictactoe_move'.")
-        print(f"({peer.username}) > ", end='', flush=True)
+        print(f"\n({peer.username}) > ", end='', flush=True)
             
     def _handle_tictactoe_move(self, peer, message, addr):
         """Handles a game move for an already active game."""
@@ -240,4 +243,4 @@ class LsnpMessageHandler:
         else:
             print(f"\n[Game Error] {response_message} (from {mover_id})")
 
-        print(f"({peer.username}) > ", end='', flush=True)
+        print(f"\n({peer.username}) > ", end='', flush=True)

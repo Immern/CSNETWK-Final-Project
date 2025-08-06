@@ -6,7 +6,7 @@ import uuid
 # LSNP Constants
 PORT = 50999
 BROADCAST_ADDR = '<broadcast>'
-PRESENCE_INTERVAL = 30 # Seconds
+PRESENCE_INTERVAL = 30 # Seconds for testing
 
 class LsnpPeer:
     """
@@ -14,7 +14,7 @@ class LsnpPeer:
     This class handles network communication and maintains the peer's state.
     """
 
-    def __init__(self, username, message_handler, bind_ip=''): # Corrected: Added 'bind_ip' parameter
+    def __init__(self, username, message_handler, bind_ip=''):
         """
         Initializes the LSNP peer.
         Args:
@@ -70,7 +70,6 @@ class LsnpPeer:
 
     def _get_local_ip(self):
         """Finds the local IP address of the machine."""
-        # This part remains the same
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             s.connect(('10.255.255.255', 1))
@@ -103,9 +102,6 @@ class LsnpPeer:
             try:
                 data, addr = self.socket.recvfrom(8192)
                 if data:
-                    # Comment out for now. This is already accessible via verbose command
-                    # print(f"[{self.username}] Data received from {addr}!")
-                    # print(f"[{self.username}] Raw data: {data.decode('utf-8')}")
                     # Delegate message handling to the message_handler object
                     self.message_handler.handle(self, data, addr)
             except socket.timeout:
@@ -117,25 +113,32 @@ class LsnpPeer:
         print(f"[{self.username}] Listener thread stopped.")
 
     def _periodic_presence(self):
-        """Periodically broadcasts a PROFILE message to the network."""
+        """Periodically broadcasts a PING and PROFILE message to the network."""
         time.sleep(2)
         while self.running:
             if self.verbose:
-                print("\n[Auto] Sending periodic profile broadcast to maintain presence.")
+                print("\n[Auto] Sending periodic presence broadcast.")
             
-            # Send a profile message
-            payload = {
+            # Send a PING message
+            ping_payload = {
+                'TYPE': 'PING',
+                'USER_ID': self.user_id,
+            }
+            self._send_message(ping_payload, BROADCAST_ADDR)
+            
+            # Send a PROFILE message
+            profile_payload = {
                 'TYPE': 'PROFILE',
                 'USER_ID': self.user_id,
                 'DISPLAY_NAME': self.username,
-                'STATUS': "Online"
+                'STATUS': "Online",
+                'TIMESTAMP': int(time.time())
             }
-            self._send_message(payload, BROADCAST_ADDR)
+            self._send_message(profile_payload, BROADCAST_ADDR)
             
             time.sleep(PRESENCE_INTERVAL)
 
     def _parse_message(self, message_str):
-        # This part of the code remains the same.
         if not message_str.strip().endswith('\n'):
             message_str += '\n\n'
         
@@ -196,3 +199,7 @@ class LsnpPeer:
             except IndexError:
                 return None
         return None
+
+    def is_follower(self, user_id):
+        """Check if a user is a follower."""
+        return user_id in self.followers

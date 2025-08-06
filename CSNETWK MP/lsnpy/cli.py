@@ -51,7 +51,7 @@ class LsnpCli:
                     'like': self._send_like_command,
                     'group': self._handle_group_command,
                     'tictactoe_invite': self._handle_tictactoe_invite_command,
-                    'tictactoe_accept': self._handle_tictactoe_accept_command, # New command
+                    'tictactoe_accept': self._handle_tictactoe_accept_command,
                     'tictactoe_move': self._handle_tictactoe_move_command,
                 }
                 
@@ -80,7 +80,8 @@ class LsnpCli:
             'TYPE': 'PROFILE',
             'USER_ID': self.peer.user_id,
             'DISPLAY_NAME': self.peer.username,
-            'STATUS': status
+            'STATUS': status,
+            'TIMESTAMP': int(time.time())
         }
         self.peer._send_message(payload, BROADCAST_ADDR)
         print("Profile broadcasted.")
@@ -137,6 +138,7 @@ class LsnpCli:
             'TYPE': 'POST',
             'USER_ID': self.peer.user_id,
             'CONTENT': args,
+            'TIMESTAMP': ts,
             'TTL': 3600,
             'MESSAGE_ID': uuid.uuid4().hex[:8],
             'TOKEN': f"{self.peer.user_id}|{ts+3600}|broadcast"
@@ -267,7 +269,7 @@ class LsnpCli:
                 'GROUP_ID': group_id,
                 'CONTENT': content,
                 'TIMESTAMP': ts,
-                'TOKEN': f"{self.peer.user_id} {ts+3600}|group"
+                'TOKEN': f"{self.peer.user_id}|{ts+3600}|group"
             }
             self.peer._send_message(payload, BROADCAST_ADDR)
             print(f"Message sent to group '{group_id}'.")
@@ -323,13 +325,14 @@ class LsnpCli:
         game = self.peer.active_games[game_id]
         
         # Send the acceptance message
+        ts = int(time.time())
         payload = {
             'TYPE': 'TICTACTOE_ACCEPT',
             'FROM': self.peer.user_id,
             'TO': inviter_id,
             'GAMEID': game_id,
-            'TIMESTAMP': int(time.time()),
-            'TOKEN': f"{self.peer.user_id}|{int(time.time())+3600}|game"
+            'TIMESTAMP': ts,
+            'TOKEN': f"{self.peer.user_id}|{ts+3600}|game"
         }
         self.peer._send_message(payload, (inviter_ip, PORT))
         
@@ -377,11 +380,12 @@ class LsnpCli:
             return
         
         # Send the move message
+        ts = int(time.time())
         payload = {
             'TYPE': 'TICTACTOE_MOVE', 'FROM': self.peer.user_id, 'TO': opponent_id,
-            'GAMEID': game_id, 'POSITION': position, 'TIMESTAMP': int(time.time()),
+            'GAMEID': game_id, 'POSITION': position, 'TIMESTAMP': ts,
             'MESSAGE_ID': uuid.uuid4().hex[:8],
-            'TOKEN': f"{self.peer.user_id}|{int(time.time())+3600}|game"
+            'TOKEN': f"{self.peer.user_id}|{ts+3600}|game"
         }
         self.peer._send_message(payload, (opponent_ip, PORT))
 
