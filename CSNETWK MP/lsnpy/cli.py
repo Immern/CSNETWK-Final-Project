@@ -4,11 +4,11 @@ import uuid
 import threading
 from lsnpy.core import LsnpPeer, BROADCAST_ADDR, PORT
 from lsnpy.handlers import TicTacToe
+
 class LsnpCli:
     """
     Manages the command-line interface and user input for the LSNP peer.
     """
-
     def __init__(self, peer):
         self.peer = peer
     
@@ -51,6 +51,7 @@ class LsnpCli:
                     'like': self._send_like_command,
                     'group': self._handle_group_command,
                     'tictactoe_invite': self._handle_tictactoe_invite_command,
+                    'tictactoe_accept': self._handle_tictactoe_accept_command, # New command
                     'tictactoe_move': self._handle_tictactoe_move_command,
                 }
                 
@@ -83,31 +84,38 @@ class LsnpCli:
         }
         self.peer._send_message(payload, BROADCAST_ADDR)
         print("Profile broadcasted.")
-
-    # All other command-related methods and print functions go here.
-    # e.g., _send_post_command, _send_dm_command, _print_peers, etc.
-    # They will all take `self` and `args` and access `self.peer` for state.
     
     def _print_help(self, args):
+        """Prints the updated, aligned help menu."""
         print("\n--- LSNP Client Commands ---")
-        print("profile <status>             - Broadcast your profile with a new status.")
-        print("post <content>               - Broadcast a public post to your followers.")
-        print("dm <user_id> <message>       - Send a direct message to a user.")
-        print("follow <user_id>             - Follow a user to subscribe to their posts.")
-        print("unfollow <user_id>           - Unfollow a user.")
-        print("followers                    - Show a list of your followers.")
-        print("following                    - Show a list of users you are following.")
-        print("like <user_id> <post_ts>     - Like a user's post, identified by its timestamp.")
-        print("group create <id> <name>     - Create a new group.")
-        print("group msg <id> <message>     - Send a message to a group.")
-        print("game invite <user_id>        - Invite a user to play Tic Tac Toe.")
-        print("peers                        - List all known peers on the network.")
-        print("posts                        - Show all received public posts from users you follow.")
-        print("dms                          - Show all received direct messages for you.")
-        print("verbose                      - Toggle detailed message logging ON/OFF.")
-        print("help                         - Show this help message.")
-        print("quit                         - Shut down the client.")
-        print("--------------------------")
+        commands = [
+            ("profile", "<status>", "Broadcast your profile with a new status."),
+            ("post", "<content>", "Broadcast a public post to your followers."),
+            ("dm", "<user_id> <message>", "Send a direct message to a user."),
+            ("follow", "<user_id>", "Follow a user to subscribe to their posts."),
+            ("unfollow", "<user_id>", "Unfollow a user."),
+            ("like", "<user_id> <post_ts>", "Like a user's post."),
+            ("group create", "<id> <name>", "Create a new group."),
+            ("group msg", "<id> <message>", "Send a message to a group."),
+            ("tictactoe_invite", "<user_id>", "Invite a user to play Tic Tac Toe."),
+            ("tictactoe_accept", "<game_id>", "Accept a Tic Tac Toe game invitation."),
+            ("tictactoe_move", "<game_id> <pos>", "Make a move in an active game (pos 0-8)."),
+            ("followers", "", "Show a list of your followers."),
+            ("following", "", "Show a list of users you are following."),
+            ("peers", "", "List all known peers on the network."),
+            ("posts", "", "Show all received public posts."),
+            ("dms", "", "Show all received direct messages."),
+            ("verbose", "", "Toggle detailed message logging ON/OFF."),
+            ("help", "", "Show this help message."),
+            ("quit", "", "Shut down the client."),
+        ]
+        cmd_col_width = 20
+        args_col_width = 25
+        for cmd, cmd_args, desc in commands:
+            padded_cmd = f"{cmd:<{cmd_col_width}}"
+            padded_args = f"{cmd_args:<{args_col_width}}"
+            print(f"{padded_cmd}{padded_args}- {desc}")
+        print("---------------------------------")
         
     def _print_peers(self, args):
         print("\n--- Known Peers ---")
@@ -138,7 +146,6 @@ class LsnpCli:
 
     def _send_dm_command(self, args):
         parts = args.split(maxsplit=1)
-        # Checks if the user provided both recipient ID and message
         if len(parts) < 2:
             print("Usage: dm <user_id> <message>")
             return
@@ -146,7 +153,7 @@ class LsnpCli:
         
         recipient_ip = self.peer.get_recipient_ip(recipient_id)
         if not recipient_ip:
-            print(f"Error: Could not determine IP for '{recipient_id}'. Make sure they have sent a profile message.")
+            print(f"Error: Could not determine IP for '{recipient_id}'.")
             return
         
         ts = int(time.time())
@@ -222,7 +229,6 @@ class LsnpCli:
         self.peer._send_message(payload, (recipient_ip, PORT))
         print(f"Like sent for post {post_ts} to {recipient_id}.")
     
-    # Should be modified to be split into GROUP_CREATE, GROUP_MESSAGE, GROUP_UPDATE
     def _handle_group_command(self, args):
         parts = args.split(maxsplit=2)
         sub_command = parts[0].lower() if parts else ""
@@ -268,19 +274,16 @@ class LsnpCli:
         else:
             print("Unknown group command. Use 'group create' or 'group msg'.")
 
-    # Should be modified to be split into TICTACTOE_INVITE, TICTACTOE_MOVE
     def _handle_tictactoe_invite_command(self, args):
-        parts = args.split(maxsplit=1)
-        print(parts)
-        # Validate
-        if len(parts) < 1:
+        if not args:
             print("Usage: tictactoe_invite <user_id>")
             return
-        recipient_id = parts[0]
+        recipient_id = args
         recipient_ip = self.peer.get_recipient_ip(recipient_id)
         if not recipient_ip:
             print(f"Error: Could not determine IP for '{recipient_id}'.")
             return
+
         ts = int(time.time())
         game_id = f"g{uuid.uuid4().int & (1<<8)-1}"
         payload = {
@@ -293,21 +296,63 @@ class LsnpCli:
             'TIMESTAMP': ts,
             'TOKEN': f"{self.peer.user_id}|{ts+3600}|game"
         }
+        self.peer.pending_game_invites[game_id] = payload
         self.peer._send_message(payload, (recipient_ip, PORT))
-        print(f"Tic Tac Toe invitation sent to {recipient_id} for game {game_id}.")
-        print(self.peer.pending_game_invites)
-    
-    def _handle_tictactoe_move_command(self, args):
-        """
-        Sends a game move. This command also implicitly accepts an invite if one is pending.
-        """
+        print(f"Tic Tac Toe invitation sent to {recipient_id} (Game ID: {game_id}).")
         
+    def _handle_tictactoe_accept_command(self, args):
+        """Accepts a game invite and starts the game."""
+        game_id = args
+        if not game_id:
+            print("Usage: tictactoe_accept <game_id>")
+            return
+
+        invite = self.peer.pending_game_invites.get(game_id)
+        if not invite:
+            print(f"Error: No pending invite found for game ID '{game_id}'.")
+            return
+
+        inviter_id = invite.get('FROM')
+        inviter_ip = self.peer.get_recipient_ip(inviter_id)
+        if not inviter_ip:
+            print(f"Error: Could not find IP for inviter '{inviter_id}'.")
+            return
+
+        # Create the game locally (acceptor is 'O')
+        self.peer.active_games[game_id] = TicTacToe(inviter_id, self.peer.user_id)
+        game = self.peer.active_games[game_id]
+        
+        # Send the acceptance message
+        payload = {
+            'TYPE': 'TICTACTOE_ACCEPT',
+            'FROM': self.peer.user_id,
+            'TO': inviter_id,
+            'GAMEID': game_id,
+            'TIMESTAMP': int(time.time()),
+            'TOKEN': f"{self.peer.user_id}|{int(time.time())+3600}|game"
+        }
+        self.peer._send_message(payload, (inviter_ip, PORT))
+        
+        # Clean up the pending invite
+        del self.peer.pending_game_invites[game_id]
+        
+        print(f"You have accepted the game invite from {inviter_id}. The game has started!")
+        game.display_board()
+        print(f"Waiting for {inviter_id} to make the first move.")
+
+    def _handle_tictactoe_move_command(self, args):
+        """Sends a move for an active game."""
         parts = args.split()
         if len(parts) != 2:
             print("Usage: tictactoe_move <game_id> <position>")
             return
 
         game_id, position_str = parts
+        game = self.peer.active_games.get(game_id)
+        if not game:
+            print(f"Error: No active game found with ID '{game_id}'.")
+            return
+
         try:
             position = int(position_str)
             if not 0 <= position <= 8:
@@ -315,35 +360,14 @@ class LsnpCli:
         except ValueError:
             print(f"Invalid position: {position_str}. Use a number between 0 and 8.")
             return
-
-        # Check for an active game
-        game = self.peer.active_games.get(game_id)
-        print(f"Active test: {self.peer.active_games}")
-        # If no active game, check for a pending invite and handle the first move
-        if not game:
-            invite_message = self.peer.pending_game_invites.get(game_id)
-            if not invite_message:
-                print(f"Error: No active game or pending invite for game ID {game_id}.")
-                return
-
-            opponent_id = invite_message['FROM']
-            opponent_ip = self.peer.get_recipient_ip(opponent_id)
-
-            # Create the game on our side (the inviter)
-            self.peer.active_games[game_id] = TicTacToe(self.peer.user_id, opponent_id)
-            game = self.peer.active_games[game_id]
-            # Remove the invite now that the game is active
-            del self.peer.pending_game_invites[game_id]
-            print(f"Game {game_id} started with {opponent_id}.")
-
+            
         # Determine opponent and their IP
-        print(f"Current game state: {game.players}")
         opponent_id = game.players['O' if game.players['X'] == self.peer.user_id else 'X']
         opponent_ip = self.peer.get_recipient_ip(opponent_id)
 
-        # Check if it's the current player's turn
+        # Validate the move
         if game.players[game.current_player_symbol] != self.peer.user_id:
-            print(f"Error: It's not your turn.")
+            print("Error: It is not your turn.")
             return
             
         row, col = position // 3, position % 3
@@ -351,38 +375,28 @@ class LsnpCli:
         if not success:
             print(f"Error: {message}")
             return
-            
-        if not opponent_ip:
-            print(f"Error: Could not determine IP for opponent '{opponent_id}'.")
-            return
         
         # Send the move message
         payload = {
-            'TYPE': 'TICTACTOE_MOVE',
-            'FROM': self.peer.user_id,
-            'TO': opponent_id,
-            'GAMEID': game_id,
-            'POSITION': position,
-            'TIMESTAMP': int(time.time()),
+            'TYPE': 'TICTACTOE_MOVE', 'FROM': self.peer.user_id, 'TO': opponent_id,
+            'GAMEID': game_id, 'POSITION': position, 'TIMESTAMP': int(time.time()),
             'MESSAGE_ID': uuid.uuid4().hex[:8],
             'TOKEN': f"{self.peer.user_id}|{int(time.time())+3600}|game"
         }
         self.peer._send_message(payload, (opponent_ip, PORT))
 
-        # Update local CLI state
-        print(f"Your move: {position}")
+        print(f"You played at position {position}.")
         game.display_board()
         win_message = game.check_win()
         if win_message:
             print(f"[GAME OVER] {win_message}")
             del self.peer.active_games[game_id]
         elif game.check_draw():
-            print(f"[GAME OVER] It's a draw!")
+            print("[GAME OVER] The game is a draw!")
             del self.peer.active_games[game_id]
         else:
-            print(f"It's now {opponent_id}'s turn.")
+            print(f"Waiting for {opponent_id} to move.")
             
-    
     def _print_posts(self, args):
         print("\n--- Public Posts (from users you follow) ---")
         if not self.peer.posts:
