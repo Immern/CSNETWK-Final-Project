@@ -103,8 +103,9 @@ class LsnpPeer:
             try:
                 data, addr = self.socket.recvfrom(8192)
                 if data:
-                    print(f"[{self.username}] Data received from {addr}!")
-                    print(f"[{self.username}] Raw data: {data.decode('utf-8')}")
+                    # Comment out for now. This is already accessible via verbose command
+                    # print(f"[{self.username}] Data received from {addr}!")
+                    # print(f"[{self.username}] Raw data: {data.decode('utf-8')}")
                     # Delegate message handling to the message_handler object
                     self.message_handler.handle(self, data, addr)
             except socket.timeout:
