@@ -2,6 +2,8 @@ import sys
 import time
 import uuid
 import threading
+import base64
+import os
 from lsnpy.core import LsnpPeer, BROADCAST_ADDR, PORT
 from lsnpy.handlers import TicTacToe
 
@@ -50,6 +52,9 @@ class LsnpCli:
                     'following': self._print_following,
                     'like': self._send_like_command,
                     'group': self._handle_group_command,
+                    'groups': self._print_groups,
+                    'file_offer': self._send_file_offer_command,
+                    'file_accept': self._send_file_accept_command,
                     'tictactoe_invite': self._handle_tictactoe_invite_command,
                     'tictactoe_accept': self._handle_tictactoe_accept_command,
                     'tictactoe_move': self._handle_tictactoe_move_command,
@@ -71,18 +76,34 @@ class LsnpCli:
         print(f"Verbose mode is now {'ON' if self.peer.verbose else 'OFF'}.")
 
     def _send_profile_command(self, args):
-        status = args
+        parts = args.split(maxsplit=1)
+        status = parts[0] if parts else "Online"
+        avatar_path = parts[1] if len(parts) > 1 else None
+
         if not status:
-            print("Usage: profile <status>")
+            print("Usage: profile <status> [path_to_avatar_image]")
             return
         
+        ts = int(time.time())
         payload = {
             'TYPE': 'PROFILE',
             'USER_ID': self.peer.user_id,
             'DISPLAY_NAME': self.peer.username,
             'STATUS': status,
-            'TIMESTAMP': int(time.time())
+            'TIMESTAMP': ts
         }
+
+        if avatar_path:
+            try:
+                with open(avatar_path, "rb") as image_file:
+                    encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+                    payload['AVATAR_TYPE'] = 'image/png' # Assuming PNG for simplicity
+                    payload['AVATAR_ENCODING'] = 'base64'
+                    payload['AVATAR_DATA'] = encoded_string
+            except FileNotFoundError:
+                print(f"Error: Avatar file not found at '{avatar_path}'")
+                return
+
         self.peer._send_message(payload, BROADCAST_ADDR)
         print("Profile broadcasted.")
     
@@ -90,14 +111,18 @@ class LsnpCli:
         """Prints the updated, aligned help menu."""
         print("\n--- LSNP Client Commands ---")
         commands = [
-            ("profile", "<status>", "Broadcast your profile with a new status."),
+            ("profile", "<status> [avatar_path]", "Broadcast your profile with a new status and optional avatar."),
             ("post", "<content>", "Broadcast a public post to your followers."),
             ("dm", "<user_id> <message>", "Send a direct message to a user."),
             ("follow", "<user_id>", "Follow a user to subscribe to their posts."),
             ("unfollow", "<user_id>", "Unfollow a user."),
             ("like", "<user_id> <post_ts>", "Like a user's post."),
             ("group create", "<id> <name>", "Create a new group."),
+            ("group update", "<id> <add/remove> <user_id>", "Add or remove a member from a group."),
             ("group msg", "<id> <message>", "Send a message to a group."),
+            ("groups", "", "Show all groups you are a member of."),
+            ("file_offer", "<user_id> <file_path>", "Offer to send a file to a user."),
+            ("file_accept", "<file_id>", "Accept a file offer."),
             ("tictactoe_invite", "<user_id>", "Invite a user to play Tic Tac Toe."),
             ("tictactoe_accept", "<game_id>", "Accept a Tic Tac Toe game invitation."),
             ("tictactoe_move", "<game_id> <pos>", "Make a move in an active game (pos 0-8)."),
@@ -110,8 +135,8 @@ class LsnpCli:
             ("help", "", "Show this help message."),
             ("quit", "", "Shut down the client."),
         ]
-        cmd_col_width = 20
-        args_col_width = 25
+        cmd_col_width = 25
+        args_col_width = 30
         for cmd, cmd_args, desc in commands:
             padded_cmd = f"{cmd:<{cmd_col_width}}"
             padded_args = f"{cmd_args:<{args_col_width}}"
@@ -232,14 +257,19 @@ class LsnpCli:
         print(f"Like sent for post {post_ts} to {recipient_id}.")
     
     def _handle_group_command(self, args):
-        parts = args.split(maxsplit=2)
+        parts = args.split(maxsplit=1)
         sub_command = parts[0].lower() if parts else ""
+        sub_args = parts[1] if len(parts) > 1 else ""
 
         if sub_command == "create":
-            if len(parts) < 3:
+            if not sub_args:
                 print("Usage: group create <group_id> <group_name>")
                 return
-            group_id, group_name = parts[1], parts[2]
+            create_parts = sub_args.split(maxsplit=1)
+            if len(create_parts) < 2:
+                print("Usage: group create <group_id> <group_name>")
+                return
+            group_id, group_name = create_parts
             ts = int(time.time())
             payload = {
                 'TYPE': 'GROUP_CREATE',
@@ -254,11 +284,68 @@ class LsnpCli:
             self.peer._send_message(payload, BROADCAST_ADDR)
             print(f"Group '{group_name}' created with ID '{group_id}'.")
         
+        elif sub_command == "update":
+            update_parts = sub_args.split(maxsplit=2)
+            if len(update_parts) < 3:
+                print("Usage: group update <group_id> <add/remove> <user_id>")
+                return
+            
+            group_id, action, user_id_to_modify = update_parts
+
+            if group_id not in self.peer.groups:
+                print("Error: You are not a member of that group or the group does not exist.")
+                return
+
+            if self.peer.groups[group_id].get('FROM') != self.peer.user_id:
+                print("Error: Only the group creator can modify the group.")
+                return
+
+            current_members = self.peer.groups[group_id].get('MEMBERS', '').split(',')
+            
+            if action.lower() == 'add':
+                if user_id_to_modify not in current_members:
+                    current_members.append(user_id_to_modify)
+            elif action.lower() == 'remove':
+                # *** THIS IS THE FIX ***
+                if user_id_to_modify == self.peer.user_id:
+                    print("Error: As the group creator, you cannot remove yourself.")
+                    return
+                
+                if user_id_to_modify in current_members:
+                    current_members.remove(user_id_to_modify)
+                else:
+                    print(f"User {user_id_to_modify} not in group.")
+                    return
+            else:
+                print("Invalid action. Use 'add' or 'remove'.")
+                return
+
+            new_members_str = ",".join(current_members)
+            self.peer.groups[group_id]['MEMBERS'] = new_members_str
+
+            ts = int(time.time())
+            payload = {
+                'TYPE': 'GROUP_UPDATE',
+                'FROM': self.peer.user_id,
+                'GROUP_ID': group_id,
+                'GROUP_NAME': self.peer.groups[group_id].get('GROUP_NAME'),
+                'MEMBERS': new_members_str,
+                'TIMESTAMP': ts,
+                'TOKEN': f"{self.peer.user_id}|{ts+3600}|group"
+            }
+
+            self.peer._send_message(payload, BROADCAST_ADDR)
+            print(f"Group '{group_id}' updated and update broadcasted.")
+
         elif sub_command == "msg":
-            if len(parts) < 3:
+            if not sub_args:
                 print("Usage: group msg <group_id> <message>")
                 return
-            group_id, content = parts[1], parts[2]
+            msg_parts = sub_args.split(maxsplit=1)
+            if len(msg_parts) < 2:
+                print("Usage: group msg <group_id> <message>")
+                return
+            group_id, content = msg_parts
             if group_id not in self.peer.groups:
                 print("Error: You are not a member of that group.")
                 return
@@ -274,7 +361,80 @@ class LsnpCli:
             self.peer._send_message(payload, BROADCAST_ADDR)
             print(f"Message sent to group '{group_id}'.")
         else:
-            print("Unknown group command. Use 'group create' or 'group msg'.")
+            print("Unknown group command. Use 'group create', 'group update', or 'group msg'.")
+
+    def _print_groups(self, args):
+        print("\n--- Your Groups ---")
+        if not self.peer.groups:
+            print("You are not a member of any groups.")
+        else:
+            for group_id, data in self.peer.groups.items():
+                name = data.get('GROUP_NAME', 'N/A')
+                members = data.get('MEMBERS', 'N/A')
+                print(f"- {name} ({group_id}): Members [{members}]")
+        print("--------------------")
+
+    def _send_file_offer_command(self, args):
+        parts = args.split(maxsplit=1)
+        if len(parts) < 2:
+            print("Usage: file_offer <user_id> <path_to_file>")
+            return
+        recipient_id, file_path = parts
+        
+        recipient_ip = self.peer.get_recipient_ip(recipient_id)
+        if not recipient_ip:
+            print(f"Error: Could not determine IP for '{recipient_id}'.")
+            return
+
+        try:
+            file_size = os.path.getsize(file_path)
+            filename = os.path.basename(file_path)
+        except FileNotFoundError:
+            print(f"Error: File not found at '{file_path}'")
+            return
+        
+        ts = int(time.time())
+        file_id = uuid.uuid4().hex[:8]
+        payload = {
+            'TYPE': 'FILE_OFFER',
+            'FROM': self.peer.user_id,
+            'TO': recipient_id,
+            'FILENAME': filename,
+            'FILESIZE': file_size,
+            'FILEID': file_id,
+            'TIMESTAMP': ts,
+            'TOKEN': f"{self.peer.user_id}|{ts+3600}|file"
+        }
+        
+        self.peer.file_transfers[file_id] = { 'path': file_path, 'info': payload }
+        
+        self.peer._send_message(payload, (recipient_ip, PORT))
+        print(f"File offer for '{filename}' sent to {recipient_id}.")
+        
+    def _send_file_accept_command(self, args):
+        file_id = args
+        if not file_id:
+            print("Usage: file_accept <file_id>")
+            return
+            
+        if file_id in self.peer.file_transfers:
+            offer_info = self.peer.file_transfers[file_id]['info']
+            sender_id = offer_info['FROM']
+            sender_ip = self.peer.get_recipient_ip(sender_id)
+
+            ts = int(time.time())
+            payload = {
+                'TYPE': 'FILE_ACCEPT',
+                'FROM': self.peer.user_id,
+                'TO': sender_id,
+                'FILEID': file_id,
+                'TIMESTAMP': ts,
+                'TOKEN': f"{self.peer.user_id}|{ts+3600}|file"
+            }
+            self.peer._send_message(payload, (sender_ip, PORT))
+            print(f"Acceptance for file '{offer_info['FILENAME']}' sent.")
+        else:
+            print(f"Error: No pending file offer with ID '{file_id}'")
 
     def _handle_tictactoe_invite_command(self, args):
         if not args:
@@ -320,11 +480,9 @@ class LsnpCli:
             print(f"Error: Could not find IP for inviter '{inviter_id}'.")
             return
 
-        # Create the game locally (acceptor is 'O')
         self.peer.active_games[game_id] = TicTacToe(inviter_id, self.peer.user_id)
         game = self.peer.active_games[game_id]
         
-        # Send the acceptance message
         ts = int(time.time())
         payload = {
             'TYPE': 'TICTACTOE_ACCEPT',
@@ -336,7 +494,6 @@ class LsnpCli:
         }
         self.peer._send_message(payload, (inviter_ip, PORT))
         
-        # Clean up the pending invite
         del self.peer.pending_game_invites[game_id]
         
         print(f"You have accepted the game invite from {inviter_id}. The game has started!")
@@ -364,11 +521,9 @@ class LsnpCli:
             print(f"Invalid position: {position_str}. Use a number between 0 and 8.")
             return
             
-        # Determine opponent and their IP
         opponent_id = game.players['O' if game.players['X'] == self.peer.user_id else 'X']
         opponent_ip = self.peer.get_recipient_ip(opponent_id)
 
-        # Validate the move
         if game.players[game.current_player_symbol] != self.peer.user_id:
             print("Error: It is not your turn.")
             return
@@ -379,7 +534,6 @@ class LsnpCli:
             print(f"Error: {message}")
             return
         
-        # Send the move message
         ts = int(time.time())
         payload = {
             'TYPE': 'TICTACTOE_MOVE', 'FROM': self.peer.user_id, 'TO': opponent_id,
