@@ -195,7 +195,8 @@ class LsnpMessageHandler:
             return
 
         if user_id not in peer.known_peers:
-            print(f"\n[Discovery] New peer discovered: {user_id}")   
+            print(f"\n[Discovery] New peer discovered: {user_id}")
+            print(f"\n({peer.username}) > ", end='', flush=True) 
         
         peer.known_peers[user_id] = message
 
@@ -207,7 +208,8 @@ class LsnpMessageHandler:
             if manual:
                 print(f"[PROFILE] {display_name} - Status: {status}")
         
-        print(f"\n({peer.username}) > ", end='', flush=True)
+        if manual or peer.verbose:
+            print(f"\n({peer.username}) > ", end='', flush=True)
 
     def _handle_post(self, peer, message, addr):
         sender_id = message.get('USER_ID')
