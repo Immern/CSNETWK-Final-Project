@@ -536,9 +536,14 @@ class LsnpCli:
         
         ts = int(time.time())
         payload = {
-            'TYPE': 'TICTACTOE_MOVE', 'FROM': self.peer.user_id, 'TO': opponent_id,
-            'GAMEID': game_id, 'POSITION': position, 'TIMESTAMP': ts,
+            'TYPE': 'TICTACTOE_MOVE', 
+            'FROM': self.peer.user_id, 
+            'TO': opponent_id,
+            'GAMEID': game_id, 
             'MESSAGE_ID': uuid.uuid4().hex[:8],
+            'POSITION': position, 
+            'SYMBOL': 'X' if game.players['X'] == self.peer.user_id else 'O',
+            'TIMESTAMP': ts,
             'TOKEN': f"{self.peer.user_id}|{ts+3600}|game"
         }
         self.peer._send_message(payload, (opponent_ip, PORT))
