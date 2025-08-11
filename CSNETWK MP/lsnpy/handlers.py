@@ -136,13 +136,17 @@ class LsnpMessageHandler:
             sender_id = parsed_message.get('USER_ID') or parsed_message.get('FROM')
             if sender_id == peer.user_id:
                 return
+            if parsed_message.get('TYPE') == 'ACK':
+                return
 
-            if peer.verbose:
-                print(f"\n--- RECV from {addr} ---")
-                print(f"Raw: {message_str.strip()}")
-                print(f"Parsed: {parsed_message}")
-                print("------------------------")
-
+            elif peer.verbose and parsed_message.get('TYPE') != 'ACK':
+                ACK_payload = {
+                    'TYPE': 'ACK',
+                    'MESSAGE_ID': parsed_message.get('MESSAGE_ID'),
+                    'STATUS': 'RECEIVED'
+                }
+                peer._send_message(ACK_payload, addr)
+            
             msg_type = parsed_message.get('TYPE')
             handler_func = self.handlers.get(msg_type)
             if handler_func:
@@ -157,7 +161,7 @@ class LsnpMessageHandler:
                 
                 handler_func(peer, parsed_message, addr)
             elif peer.verbose:
-                print(f"[Ignored] Unknown message type: {msg_type}")
+                print(f"[Ignored] Unknown message type: {parsed_message.get('TYPE')}")
                 print(f"\n({peer.username}) > ", end='', flush=True)
 
         except (UnicodeDecodeError, ValueError) as e:
