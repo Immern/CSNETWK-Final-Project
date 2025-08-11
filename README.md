@@ -1,5 +1,5 @@
 # CSNETWK-Final-Project
-A brief description of what this project does and who it's for.
+This project was created in accordance with the CSNETWK Project: Local Social Networking Protocol (LSNP)
 
 ## Getting Started
 
@@ -28,5 +28,5 @@ Follow these steps to get a local copy up and running on your machine.
        ```bash
        python main.py --mode simulate --ip 127.0.0.2
        ```
-2. Type in your username in both terminals. This instantiates a host withint the local server and creates a User Id.
+2. Type in your username in both terminals. This instantiates a host within the local server and creates a User ID.
 3. Type 'help' to get a list of the commands available.
