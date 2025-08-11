@@ -149,9 +149,8 @@ class LsnpMessageHandler:
                 if msg_type not in ['PING', 'PROFILE']:
                     expected_scope = self.message_scopes.get(msg_type)
                     if expected_scope:
-                        if parsed_message.get('TYPE') != 'TICTACTOE_RESULT':
-                            is_valid, reason = self._validate_token(peer, parsed_message, expected_scope)
-                        if not is_valid:
+                        is_valid, reason = self._validate_token(peer, parsed_message, expected_scope)
+                        if not is_valid and parsed_message.get('TYPE') != 'TICTACTOE_RESULT':
                             print(f"\n[Security] Invalid token for {msg_type} from {sender_id}: {reason}")
                             print(f"\n({peer.username}) > ", end='', flush=True)
                             return
