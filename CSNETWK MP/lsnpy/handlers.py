@@ -206,7 +206,7 @@ class LsnpMessageHandler:
                 print(f"{key}: {value}")
         else:
             if manual:
-                print(f"[PROFILE] {display_name} - Status: {status}")
+                print(f"\n[PROFILE]\n{display_name} - Status: {status}")
         
         if manual or peer.verbose:
             print(f"\n({peer.username}) > ", end='', flush=True)
