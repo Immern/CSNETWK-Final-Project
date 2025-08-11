@@ -90,7 +90,8 @@ class LsnpCli:
             'USER_ID': self.peer.user_id,
             'DISPLAY_NAME': self.peer.username,
             'STATUS': status,
-            'TIMESTAMP': ts
+            'TIMESTAMP': ts,
+            'MANUAL': True
         }
 
         if avatar_path:
