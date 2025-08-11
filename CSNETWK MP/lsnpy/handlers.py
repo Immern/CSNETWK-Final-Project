@@ -77,6 +77,7 @@ class LsnpMessageHandler:
             'FOLLOW': self._handle_follow,
             'UNFOLLOW': self._handle_unfollow,
             'LIKE': self._handle_like,
+            'UNLIKE': self._handle_unlike,
             'GROUP_CREATE': self._handle_group_create,
             'GROUP_UPDATE': self._handle_group_update,
             'GROUP_MESSAGE': self._handle_group_message,
@@ -91,6 +92,7 @@ class LsnpMessageHandler:
         self.message_scopes = {
             'POST': 'broadcast',
             'LIKE': 'broadcast',
+            'UNLIKE': 'broadcast',
             'DM': 'chat',
             'FOLLOW': 'follow',
             'UNFOLLOW': 'follow',
@@ -232,9 +234,20 @@ class LsnpMessageHandler:
             print(f"\n({peer.username}) > ", end='', flush=True)
 
     def _handle_like(self, peer, message, addr):
+        post_ts = message.get('POST_TIMESTAMP')
+        sender_id = message.get('FROM')
         if message.get('TO') == peer.user_id:
-            sender_id = message.get('FROM')
+            peer.likes.setdefault(post_ts, set()).add(sender_id)
             print(f"\n[Notification] {sender_id} liked your post.")
+            print(f"\n({peer.username}) > ", end='', flush=True)
+
+    def _handle_unlike(self, peer, message, addr):
+        post_ts = message.get('POST_TIMESTAMP')
+        sender_id = message.get('FROM')
+        if message.get('TO') == peer.user_id:
+            if post_ts in peer.likes:
+                peer.likes[post_ts].discard(sender_id)
+            print(f"\n[Notification] {sender_id} unliked your post.")
             print(f"\n({peer.username}) > ", end='', flush=True)
 
     def _handle_group_create(self, peer, message, addr):

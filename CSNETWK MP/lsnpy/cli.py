@@ -244,8 +244,15 @@ class LsnpCli:
             return
         
         ts = int(time.time())
+
+        already_liked = (
+            post_ts in self.peer.likes and
+            self.peer.user_id in self.peer.likes[post_ts]
+        )
+        msg_type = 'UNLIKE' if already_liked else 'LIKE'
+
         payload = {
-            'TYPE': 'LIKE',
+            'TYPE': msg_type,
             'FROM': self.peer.user_id,
             'TO': recipient_id,
             'POST_TIMESTAMP': post_ts,
@@ -254,7 +261,13 @@ class LsnpCli:
             'TOKEN': f"{self.peer.user_id}|{ts+3600}|broadcast"
         }
         self.peer._send_message(payload, (recipient_ip, PORT))
-        print(f"Like sent for post {post_ts} to {recipient_id}.")
+
+        if msg_type == 'LIKE':
+            self.peer.likes.setdefault(post_ts, set()).add(self.peer.user_id)
+            print(f"Liked post {post_ts} from {recipient_id}.")
+        else:
+            self.peer.likes.get(post_ts, set()).discard(self.peer.user_id)
+            print(f"Unliked post {post_ts} from {recipient_id}.")
     
     def _handle_group_command(self, args):
         parts = args.split(maxsplit=1)

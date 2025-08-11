@@ -40,6 +40,7 @@ class LsnpPeer:
         self.pending_game_invites = {}
         self.active_games = {}
         self.file_transfers = {} # For managing file chunks
+        self.likes = {} # Set of likes
         
         # Set up the UDP socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
