@@ -6,7 +6,7 @@ import uuid
 # LSNP Constants
 PORT = 50999
 BROADCAST_ADDR = '<broadcast>'
-PRESENCE_INTERVAL = 30 # Seconds for testing
+PRESENCE_INTERVAL = 300 # 30 Seconds for testing
 
 class LsnpPeer:
     """
