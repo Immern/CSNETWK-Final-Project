@@ -550,15 +550,42 @@ class LsnpCli:
 
         print(f"You played at position {position}.")
         game.display_board()
-        win_message = game.check_win()
-        if win_message:
+        game_result = game.check_win()
+        if(game_result): 
+            win_message, win_line, win_symbol = game_result
+        if game_result and win_message:
             print(f"[GAME OVER] {win_message}")
+            payload = {
+                'TYPE': 'TICTACTOE_RESULT', 
+                'FROM': self.peer.user_id, 
+                'TO': opponent_id,
+                'GAMEID': game_id, 
+                'MESSAGE_ID': uuid.uuid4().hex[:8],
+                'RESULT': 'WIN' if game.players[win_symbol] == self.peer.user_id else 'LOSS', 
+                'SYMBOL': 'X' if game.players['X'] == self.peer.user_id else 'O',
+                'WINNING_LINE': win_line,
+                'TIMESTAMP': ts,
+            }
+            self.peer._send_message(payload, (opponent_ip, PORT))
+
             del self.peer.active_games[game_id]
         elif game.check_draw():
             print("[GAME OVER] The game is a draw!")
+            payload = {
+                'TYPE': 'TICTACTOE_RESULT', 
+                'FROM': self.peer.user_id, 
+                'TO': opponent_id,
+                'GAMEID': game_id, 
+                'MESSAGE_ID': uuid.uuid4().hex[:8],
+                'RESULT': 'DRAW',
+                'SYMBOL': 'X' if game.players['X'] == self.peer.user_id else 'O',
+                'WINNING_LINE': 'N/A',
+                'TIMESTAMP': ts,
+            }
             del self.peer.active_games[game_id]
         else:
             print(f"Waiting for {opponent_id} to move.")
+     
             
     def _print_posts(self, args):
         print("\n--- Public Posts (from users you follow) ---")

@@ -42,17 +42,22 @@ class TicTacToe:
     def check_win(self):
         for symbol in ['X', 'O']:
             # Check rows
-            for row in self.board:
+            for i, row in enumerate(self.board):
                 if all(cell == symbol for cell in row):
-                    return f"{self.players[symbol]} wins!"
+                    winline = [i*3, i*3 + 1, i*3 + 2]
+                    return f"{self.players[symbol]} wins!", winline, symbol
             # Check columns
             for col in range(3):
                 if all(self.board[row][col] == symbol for row in range(3)):
-                    return f"{self.players[symbol]} wins!"
+                    winline = [col, col + 3, col + 6]
+                    return f"{self.players[symbol]} wins!", winline, symbol
             # Check diagonals
-            if all(self.board[i][i] == symbol for i in range(3)) or \
-               all(self.board[i][2 - i] == symbol for i in range(3)):
-                return f"{self.players[symbol]} wins!"
+            if all(self.board[i][i] == symbol for i in range(3)):
+                winline = [0, 4, 8]
+                return f"{self.players[symbol]} wins!", winline, symbol
+            if all(self.board[i][2 - i] == symbol for i in range(3)):
+                winline = [2, 4, 6]
+                return f"{self.players[symbol]} wins!", winline, symbol
         return None
             
     def check_draw(self):        
@@ -144,7 +149,8 @@ class LsnpMessageHandler:
                 if msg_type not in ['PING', 'PROFILE']:
                     expected_scope = self.message_scopes.get(msg_type)
                     if expected_scope:
-                        is_valid, reason = self._validate_token(peer, parsed_message, expected_scope)
+                        if parsed_message.get('TYPE') != 'TICTACTOE_RESULT':
+                            is_valid, reason = self._validate_token(peer, parsed_message, expected_scope)
                         if not is_valid:
                             print(f"\n[Security] Invalid token for {msg_type} from {sender_id}: {reason}")
                             print(f"\n({peer.username}) > ", end='', flush=True)
@@ -394,9 +400,10 @@ class LsnpMessageHandler:
         if success:
             print(f"\n[Game Move] {mover_id} played at position {position}.")
             game.display_board()
-            
-            win_message = game.check_win()
-            if win_message:
+            game_result = game.check_win()
+            if game_result: 
+                win_message, win_line, win_symbol = game_result 
+            if game_result and win_message:
                 print(f"\n[Game Over] {win_message}")
                 del peer.active_games[game_id]
             elif game.check_draw():
