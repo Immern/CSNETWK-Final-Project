@@ -19,7 +19,7 @@ Follow these steps to get a local copy up and running on your machine.
     ```
 
 ### Usage
-1. After making sure you are in the correct directory, open 2 terminals and run the following command:
+1. After making sure you are in the correct directory, open at least 2 terminals and run the following command:
     - Terminal 1:
        ```bash
        python main.py --mode simulate --ip 127.0.0.1
