@@ -15,7 +15,7 @@ Follow these steps to get a local copy up and running on your machine.
     ```
 2.  Navigate to the project directory:
     ```bash
-    cd /CSNETWK-Final-Project
+    cd /CSNETWK-Final-Project/CSNETWK MP
     ```
 
 ### Usage
