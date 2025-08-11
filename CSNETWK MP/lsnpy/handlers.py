@@ -175,11 +175,21 @@ class LsnpMessageHandler:
 
 
     def _handle_profile(self, peer, message, addr):
-        user_id = message.get('USER_ID')
-        if user_id and user_id not in peer.known_peers:
-            print(f"\n[Discovery] New peer discovered: {user_id}")
-            print(f"\n({peer.username}) > ", end='', flush=True)
+        user_id = message.get('USER_ID', 'Unknown')
+        display_name = message.get('DISPLAY_NAME', 'N/A')
+        status = message.get('STATUS', 'N/A')
+
+        if not user_id or user_id == 'Unknown':
+            return
+
+        if user_id not in peer.known_peers:
+            print(f"\n[Discovery] New peer discovered: {user_id}")   
+        
+        print(f"[PROFILE] {display_name} - Status: {status}")
+        
         peer.known_peers[user_id] = message
+
+        print(f"\n({peer.username}) > ", end='', flush=True)
 
     def _handle_post(self, peer, message, addr):
         sender_id = message.get('USER_ID')
